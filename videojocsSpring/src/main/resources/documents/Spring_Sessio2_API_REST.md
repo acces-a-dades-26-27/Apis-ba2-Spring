@@ -22,7 +22,7 @@
    - [9.1 El servei decideix el codi](#llancar)
    - [9.2 `@RestControllerAdvice`: errors de validació](#advice)
    - [9.3 L'alternativa: excepcions pròpies](#problemdetail)
-10. [CRUD complet: `Estudi`](#crud)
+10. [L'API del projecte: plataformes i videojocs](#crud)
 11. [Cap a Catan](#catan)
 12. [Errors típics](#errors)
 
@@ -37,9 +37,9 @@ Una **API** (*Application Programming Interface*) és la porta per la qual un pr
 
 | Principi | Què vol dir | Exemple |
 |---|---|---|
-| **Recursos** | L'API exposa "coses" (estudis, videojocs, partides), no funcions | `/api/estudis/3` és l'estudi 3 |
-| **URL identifica, verb actua** | L'acció la diu el mètode HTTP, no l'URL | `DELETE /api/estudis/3`, no `GET /api/esborrarEstudi?id=3` |
-| **Representació** | El recurs viatja en un format (JSON) | `{"id":3,"nom":"Nintendo"}` |
+| **Recursos** | L'API exposa "coses" (estudis, videojocs, partides), no funcions | `/api/videojocs/3` és el videojoc 3 |
+| **URL identifica, verb actua** | L'acció la diu el mètode HTTP, no l'URL | `DELETE /api/videojocs/3`, no `GET /api/esborrarVideojoc?id=3` |
+| **Representació** | El recurs viatja en un format (JSON) | `{"id":1,"nom":"PC"}` |
 | **Sense estat** (*stateless*) | Cada petició porta tot el que cal. El servidor no recorda res del client entre peticions | Per això els serveis no guarden estat ([sessió 1, §8](Spring_Sessio1_Intro.md#di)) |
 | **Codis d'estat** | El resultat es comunica amb el codi HTTP | `404` si no existeix, `201` si s'ha creat |
 
@@ -50,10 +50,10 @@ Una **API** (*Application Programming Interface*) és la porta per la qual un pr
 
 | Regla | Bé | Malament |
 |---|---|---|
-| Noms, no verbs | `POST /api/estudis` | `GET /api/add?name=...` |
-| Plural per a col·leccions | `/api/estudis`, `/api/estudis/3` | `/api/estudi/3` |
+| Noms, no verbs | `POST /api/videojocs` | `GET /api/add?name=...` |
+| Plural per a col·leccions | `/api/plataformes`, `/api/plataformes/3` | `/api/plataforma/3` |
 | L'id a la ruta | `/api/videojocs/7` | `/api/videojocs?id=7` |
-| Jerarquia per a recursos que en contenen d'altres | `/api/estudis/3/videojocs` | `/api/videojocsDeEstudi?estudi=3` |
+| Jerarquia per a recursos que en contenen d'altres | `/api/videojocs/3/llancaments` | `/api/llancamentsDeVideojoc?videojoc=3` |
 | Filtres, ordre i paginació com a paràmetres | `/api/videojocs?categoria=RPG&ordre=nom` | `/api/videojocs/rpg/ordenatsPerNom` |
 | Minúscules i guions si cal | `/api/fitxes-tecniques` | `/api/FitxesTecniques` |
 
@@ -62,7 +62,7 @@ Una **API** (*Application Programming Interface*) és la porta per la qual un pr
 ```
 POST /api/partides/5/daus                    tira els daus a la partida 5
 POST /api/jugadors/12/construir?tipus=POBLAT&posicio=31
-POST /api/categories/RPG/descompte?import=5
+POST /api/videojocs/descompte?categoria=RPG&import=5
 ```
 
 És acceptable i habitual: el que no s'ha de fer és fer servir `GET` per a una acció que modifica dades.
@@ -90,7 +90,7 @@ POST /api/categories/RPG/descompte?import=5
 | `DELETE` | Esborrar | `@DeleteMapping` | No | No | Sí |
 
 - **Segur**: no modifica res al servidor. Un navegador, un cercador o una cache poden fer `GET` sense demanar permís. Per això **un `GET` no pot modificar dades**.
-- **Idempotent**: fer-lo dues vegades deixa el servidor igual que fer-lo una. `DELETE /api/estudis/3` dues vegades: el segon ja no troba res, però l'estat final és el mateix. `POST /api/estudis` dues vegades crea **dos** estudis (o dona error el segon).
+- **Idempotent**: fer-lo dues vegades deixa el servidor igual que fer-lo una. `DELETE /api/videojocs/3` dues vegades: el segon ja no troba res, però l'estat final és el mateix. `POST /api/plataformes?nom=Xbox` dues vegades no: la primera crea la plataforma i la segona dona un `409`.
 
 Totes les anotacions deriven de `@RequestMapping`:
 
@@ -137,12 +137,12 @@ Una classe controlador pot tenir tants mètodes com calgui. El límit és el dis
 ### 5.1 `@PathVariable`: part de la ruta
 
 ```java
-// GET /api/estudis/3/videojocs/7
-@GetMapping("/{idEstudi}/videojocs/{idVideojoc}")
-public ResponseEntity<?> buscar(@PathVariable int idEstudi, @PathVariable int idVideojoc) { ... }
+// POST /api/videojocs/3/categories/RPG
+@PostMapping("/{id}/categories/{categoria}")
+public ResponseEntity<?> afegirCategoria(@PathVariable int id, @PathVariable String categoria) { ... }
 ```
 
-El nom entre `{}` ha de coincidir amb el del paràmetre Java (o indicar-lo: `@PathVariable("idEstudi") int id`). Si el valor no es pot convertir (`/api/estudis/abc` amb un `int`), Spring respon `400`.
+El nom entre `{}` ha de coincidir amb el del paràmetre Java (o indicar-lo: `@PathVariable("id") int idVideojoc`). Si el valor no es pot convertir (`/api/videojocs/abc` amb un `int`), Spring respon `400`.
 
 <a id="requestparam"></a>
 ### 5.2 `@RequestParam`: paràmetres de consulta
@@ -167,11 +167,12 @@ public ResponseEntity<List<VideojocResum>> llistar(
 ### 5.3 `@RequestBody`: un JSON al cos de la petició
 
 ```java
-// POST /api/estudis
+// POST /api/videojocs
 // Content-Type: application/json
-// {"nom": "Supergiant Games"}
+// {"nom": "Hades II", "estudi": "Supergiant Games", "motor": "Motor propi",
+//  "categories": ["Roguelike"], "preus": {"PC": 29.99, "Switch": 29.99}}
 @PostMapping
-public ResponseEntity<?> crear(@Valid @RequestBody EstudiPeticio peticio) { ... }
+public ResponseEntity<?> publicar(@Valid @RequestBody VideojocPeticio peticio) { ... }
 ```
 
 Jackson converteix el JSON en un objecte Java fent coincidir **els noms dels camps**. Si el JSON està mal format, Spring respon `400`. Si un camp del JSON no existeix a la classe, per defecte s'ignora.
@@ -221,23 +222,23 @@ ResponseEntity.status(HttpStatus.NOT_FOUND).body("missatge")// qualsevol codi
 
 // Amb la capçalera pròpia
 ResponseEntity.status(HttpStatus.CONFLICT)
-		.header("Header-Customitzat", "ESTUDI DUPLICAT")
-		.body("ERROR: JA EXISTEIX L'ESTUDI " + nom);
+		.header("Header-Customitzat", "VIDEOJOC DUPLICAT")
+		.body("ERROR: JA EXISTEIX EL VIDEOJOC " + nom);
 ```
 
 ### El tipus del cos: `ResponseEntity<T>` o `ResponseEntity<?>`
 
 | Tipus | Quan | Exemple |
 |---|---|---|
-| `ResponseEntity<List<Estudi>>` | El cos sempre és del mateix tipus | `llistar()`: sempre una llista (potser buida) |
+| `ResponseEntity<List<Plataforma>>` | El cos sempre és del mateix tipus | `llistar()`: sempre una llista (potser buida) |
 | `ResponseEntity<String>` | El cos sempre és un text | `esborrar()`: un missatge o res |
-| `ResponseEntity<?>` | El cos **depèn del resultat** | `buscar()`: l'`Estudi` si el troba, un `String` amb l'error si no |
+| `ResponseEntity<?>` | El cos **depèn del resultat** | `buscar()`: la `Plataforma` si la troba, un `String` amb l'error si no |
 
 El `?` vol dir "qualsevol tipus". Així, en un error, el client rep el missatge al cos en lloc d'un cos buit (`body(null)`).
 
 ### La capçalera pròpia
 
-`Header-Customitzat` porta informació extra per a qui consumeix l'API (`"Total estudis: 3"`, `"ID 99 NO TROBAT"`). Es veu a la pestanya *Headers* de Postman o amb `curl -i`. Dues regles:
+`Header-Customitzat` porta informació extra per a qui consumeix l'API (`"Total plataformes: 3"`, `"ID 99 NO TROBAT"`). Es veu a la pestanya *Headers* de Postman o amb `curl -i`. Dues regles:
 
 - El **missatge principal va al cos**. La capçalera és informació complementària.
 - **Sense accents** a les capçaleres: HTTP no les pensa per a caràcters fora de l'ASCII i poden arribar malmeses. Els accents, al cos.
@@ -252,21 +253,21 @@ Un **DTO** (*Data Transfer Object*) és una classe que només serveix per transp
 | | DTO de **petició** | DTO de **resposta** |
 |---|---|---|
 | Què és | El JSON que **envia** el client (`@RequestBody`) | El JSON que **retorna** l'API |
-| Exemple | `EstudiPeticio`, `VideojocPeticio` | `VideojocResum`, `VideojocResposta` |
+| Exemple | `VideojocPeticio` | `VideojocResum`, `VideojocResposta` |
 | Avui | **Sí** | A la sessió 3, quan apareixen les relacions |
 
 ### Per què no rebre l'entitat al `@RequestBody`
 
 ```java
 @PostMapping
-public ResponseEntity<?> crear(@RequestBody Estudi estudi) { ... }   // NO
+public ResponseEntity<?> publicar(@RequestBody Videojoc videojoc) { ... }   // NO
 ```
 
-| Problema | Amb `EstudiPeticio` |
+| Problema | Amb `VideojocPeticio` |
 |---|---|
-| El client pot enviar camps que no hauria de tocar: `{"id": 1, "nom": "..."}` sobreescriuria l'estudi 1 | Només té `nom` |
+| El client pot enviar camps que no hauria de tocar: `{"id": 1, ...}` sobreescriuria el videojoc 1 | No té `id` |
 | Les validacions de l'API (`@NotBlank`) es barregen amb les de la BD a l'entitat | Cada petició té les seves |
-| La petició no sempre té la forma de l'entitat: per publicar un videojoc, l'estudi arriba **pel nom** (`"estudi": "Nintendo"`), no com un objecte `Estudi` | El DTO té la forma de la petició |
+| La petició no té la forma de l'entitat: l'estudi, les categories i les plataformes arriben **pel nom** (`"estudi": "Nintendo"`), no com a objectes `Estudi` o `Categoria` | El DTO té la forma de la petició |
 | Canviar l'entitat canvia l'API i trenca els clients | L'API és estable |
 
 ### Records
@@ -277,27 +278,32 @@ Amb Java 16+ els DTO es fan amb **`record`**: immutables, amb constructor, acces
 package cat.iesabadell.videojocs.dto;
 
 /*
- * DTO de PETICIÓ: el JSON que el client pot enviar per crear o modificar un estudi.
- *   {"nom": "Supergiant Games"}
- * Només té els camps que el client pot tocar: ni l'id ni la llista de videojocs.
+ * DTO de PETICIÓ per publicar un videojoc complet. La forma és la que li va bé al client,
+ * no la de les taules: l'estudi, les categories i les plataformes van pel NOM.
+ * Les validacions s'hi afegeixen a §8.
  */
-public record EstudiPeticio(String nom) {
+public record VideojocPeticio(String nom, String estudi, String motor,
+		List<String> categories, Map<String, BigDecimal> preus) {
 }
 ```
 
-Equival a una classe amb un atribut `private final String nom`, el constructor, el mètode `nom()`, `equals`, `hashCode` i `toString`. Al servei: `peticio.nom()`.
+```json
+{
+  "nom": "Hades II",
+  "estudi": "Supergiant Games",
+  "motor": "Motor propi",
+  "categories": ["Roguelike"],
+  "preus": { "PC": 29.99, "Switch": 29.99 }
+}
+```
+
+Equival a una classe amb un atribut `private final` per a cada camp, el constructor, els accessors (`nom()`, `estudi()`, `categories()`...), `equals`, `hashCode` i `toString`. Al servei: `peticio.nom()`, `peticio.preus()`.
 
 > **Records i JPA**: un `record` **no** pot ser una `@Entity` (és immutable i no té constructor buit). Els records són per als DTO i per a les projeccions de consultes (sessió 4).
 
 ### I la resposta?
 
-`Estudi` es pot retornar directament perquè la seva única relació (`videojocs`) porta `@JsonIgnore`: Jackson se la salta. És l'opció senzilla quan una entitat té poques relacions i cap fa falta a la resposta. A la sessió 3 veurem per què amb `Videojoc` no n'hi ha prou i cal un DTO de resposta.
-
-```java
-@OneToMany(mappedBy="estudi", cascade=CascadeType.ALL, orphanRemoval=true, fetch=FetchType.LAZY)
-@JsonIgnore
-private List<Videojoc> videojocs = new ArrayList<>();
-```
+`Plataforma` es pot retornar directament: no té relacions pròpies i Jackson la converteix tal qual (`{"id":1,"nom":"PC"}`). És el que fa `PlataformaService` des de la sessió 1. `Videojoc` no: té relacions, i a la sessió 3 veurem per què cal un DTO de resposta.
 
 ---
 
@@ -309,19 +315,33 @@ Les mateixes anotacions de **Bean Validation** que vam veure a la sessió 1 d'Hi
 Al DTO de petició:
 
 ```java
-public record EstudiPeticio(
+public record VideojocPeticio(
 		@NotBlank(message = "El nom és obligatori")
-		@Size(max = 50, message = "El nom no pot passar de 50 caràcters")
-		String nom) {
+		String nom,
+
+		@NotBlank(message = "L'estudi és obligatori")
+		String estudi,
+
+		// Opcional: si no hi és, el videojoc no té fitxa tècnica
+		String motor,
+
+		@NotNull(message = "Cal la llista de categories (pot ser buida)")
+		List<String> categories,
+
+		// Clau: nom de la plataforma. Valor: preu (ha de ser positiu)
+		@NotNull(message = "Cal el mapa de preus (pot ser buit)")
+		Map<String, @Positive(message = "Els preus han de ser positius") BigDecimal> preus) {
 }
 ```
+
+Fixeu-vos en `Map<String, @Positive BigDecimal>`: la validació s'aplica a **cada valor** del mapa.
 
 I `@Valid` al paràmetre del controlador:
 
 ```java
 @PostMapping
-public ResponseEntity<?> crear(@Valid @RequestBody EstudiPeticio peticio) {
-	return service.crear(peticio);
+public ResponseEntity<?> publicar(@Valid @RequestBody VideojocPeticio peticio) {
+	return service.publicar(peticio);
 }
 ```
 
@@ -357,21 +377,22 @@ public ResponseEntity<PaginaResposta<VideojocResum>> pagina(
 Cada mètode del servei comprova els casos d'error **abans** de fer la feina i, per a cadascun, retorna el `ResponseEntity` amb el codi que toca. El camí bo va al final:
 
 ```java
+// PlataformaService
 public ResponseEntity<String> esborrar(int id) {
-	Optional<Estudi> e = repository.findById(id);
-	if (!e.isPresent()) {                                         // 1. no existeix -> 404
+	Optional<Plataforma> p = repository.findById(id);
+	if (!p.isPresent()) {                                         // 1. no existeix -> 404
 		return ResponseEntity.status(HttpStatus.NOT_FOUND)
 				.header("Header-Customitzat", "ID " + id + " NO TROBAT")
-				.body("NO EXISTEIX CAP ESTUDI AMB ID " + id);
+				.body("NO EXISTEIX CAP PLATAFORMA AMB ID " + id);
 	}
-	if (vRepository.existsByEstudiId(id)) {                       // 2. regla de negoci -> 409
+	if (lRepository.existsByPlataformaId(id)) {                   // 2. regla de negoci -> 409
 		return ResponseEntity.status(HttpStatus.CONFLICT)
-				.header("Header-Customitzat", "ESTUDI AMB VIDEOJOCS")
-				.body("ERROR: L'ESTUDI " + e.get().getNom() + " TÉ VIDEOJOCS I NO ES POT ESBORRAR");
+				.header("Header-Customitzat", "PLATAFORMA AMB LLANCAMENTS")
+				.body("ERROR: " + p.get().getNom() + " TE LLANÇAMENTS I NO ES POT ESBORRAR");
 	}
-	repository.delete(e.get());                                   // 3. camí bo -> 204
+	repository.delete(p.get());                                   // 3. camí bo -> 204
 	return ResponseEntity.noContent()
-			.header("Header-Customitzat", "Estudi " + id + " esborrat")
+			.header("Header-Customitzat", "Plataforma " + id + " esborrada")
 			.build();
 }
 ```
@@ -379,7 +400,7 @@ public ResponseEntity<String> esborrar(int id) {
 | Cas | Codi |
 |---|---|
 | El recurs no existeix | `404` |
-| Duplicat, regla de negoci ("té videojocs", "no és el teu torn") | `409` |
+| Duplicat, regla de negoci ("té llançaments", "no és el teu torn") | `409` |
 | Creat | `201` (+ `Location`) |
 | Esborrat | `204` |
 | Llegit o modificat | `200` |
@@ -424,7 +445,7 @@ public class GestorErrors {
 }
 ```
 
-Resposta d'un `POST /api/estudis` amb `{"nom": ""}`:
+Resposta d'un `POST /api/videojocs` amb `{"nom": "", "estudi": "Nintendo", "categories": [], "preus": {}}`:
 
 ```json
 { "nom": "El nom és obligatori" }
@@ -435,13 +456,13 @@ Ha de ser a sota del paquet arrel, com tots els beans.
 <a id="problemdetail"></a>
 ### 9.3 L'alternativa: excepcions pròpies
 
-Molts projectes ho fan a l'inrevés: el servei **retorna dades** (l'`Estudi`, no un `ResponseEntity`) i, quan alguna cosa falla, **llança una excepció pròpia**. El `@RestControllerAdvice` converteix cada excepció en una resposta:
+Molts projectes ho fan a l'inrevés: el servei **retorna dades** (la `Plataforma`, no un `ResponseEntity`) i, quan alguna cosa falla, **llança una excepció pròpia**. El `@RestControllerAdvice` converteix cada excepció en una resposta:
 
 ```java
 // Servei
-public Estudi buscar(int id) {
+public Plataforma buscar(int id) {
 	return repository.findById(id)
-			.orElseThrow(() -> new NoTrobatException("NO EXISTEIX CAP ESTUDI AMB ID " + id));
+			.orElseThrow(() -> new NoTrobatException("NO EXISTEIX CAP PLATAFORMA AMB ID " + id));
 }
 
 // GestorErrors
@@ -463,180 +484,123 @@ Spring també porta un format estàndard per als errors (`ProblemDetail`, RFC 94
 ---
 
 <a id="crud"></a>
-## 10. CRUD complet: `Estudi`
+## 10. L'API del projecte: plataformes i videojocs
 
-El codi és el del projecte `videojocsSpring`.
+El codi és el del projecte `videojocsSpring`. Hi ha dos controladors:
+
+| Controlador | Servei | Què és |
+|---|---|---|
+| `PlataformaController` (`/api/plataformes`) | `PlataformaService` | El CRUD de la sessió 1, ara amb l'esborrat |
+| `VideojocController` (`/api/videojocs`) | `VideojocService` | El **servei fort** (sessió 3): tot el que toca l'agregat Videojoc |
+
+No hi ha `EstudiController` ni `CategoriaController`. Com al DAO fort, les altres entitats no tenen API pròpia: es gestionen des de Videojoc. L'estudi i les categories es busquen **pel nom**; la fitxa tècnica i els llançaments es desen **en cascada** des del videojoc.
+
+### Plataformes: el CRUD
 
 Regles de negoci:
-- No hi pot haver dos estudis amb el mateix nom.
-- **No es pot esborrar un estudi que té videojocs.** Ull: `Estudi.videojocs` té `cascade = ALL` i `orphanRemoval`. Si l'esborréssim sense comprovar-ho, s'esborrarien tots els seus videojocs.
-
-### Repositoris
+- No hi pot haver dues plataformes amb el mateix nom.
+- **No es pot esborrar una plataforma que té llançaments.** La FK de `llancament` ho impediria amb un error de BD poc clar: es comprova abans i es respon `409` ([§9.1](#llancar)).
 
 ```java
-public interface EstudiRepository extends JpaRepository<Estudi, Integer> {
+public interface PlataformaRepository extends JpaRepository<Plataforma, Integer> {
 
-	Optional<Estudi> findByNom(String nom);
+	Optional<Plataforma> findByNom(String nom);
 
 	boolean existsByNom(String nom);
 
-	// Hi ha un ALTRE estudi (id diferent) amb aquest nom? Per al PUT
-	boolean existsByNomAndIdNot(String nom, Integer id);
+	// ... les consultes derivades de la sessió 1 i les de la sessió 4
 
+}
+
+public interface LlancamentRepository extends JpaRepository<Llancament, Integer> {
+
+	// Navega per la relació: llancament.plataforma.id (només mira la FK)
+	boolean existsByPlataformaId(Integer idPlataforma);
+
+	// ...
+
+}
+```
+
+`llistar` i `buscar` són els de la sessió 1, i `esborrar` és el de [§9.1](#llancar). El `crear`:
+
+```java
+public ResponseEntity<String> crear(String nom) {
+	// Regla de negoci: no hi pot haver dues plataformes amb el mateix nom
+	if (repository.existsByNom(nom)) {
+		return ResponseEntity.status(HttpStatus.CONFLICT)
+				.header("Header-Customitzat", "PLATAFORMA DUPLICADA")
+				.body("ERROR: JA EXISTEIX LA PLATAFORMA " + nom);
+	}
+	Plataforma p = repository.save(new Plataforma(nom));
+	return ResponseEntity.status(HttpStatus.CREATED)
+			.header("Header-Customitzat", "Plataforma creada amb ID: " + p.getId())
+			.body("PLATAFORMA INSERIDA: " + p);
 }
 ```
 
 ```java
-public interface VideojocRepository extends JpaRepository<Videojoc, Integer> {
+// PlataformaController
+// POST localhost:8080/api/plataformes?nom=Xbox
+@PostMapping
+public ResponseEntity<String> crear(@RequestParam String nom) {
+	return service.crear(nom);
+}
 
-	// Navega per la relació: videojoc.estudi.id (només mira la FK)
-	boolean existsByEstudiId(Integer idEstudi);
-
-	long countByEstudiId(Integer idEstudi);
-
+// DELETE localhost:8080/api/plataformes/4
+@DeleteMapping(path="/{id}")
+public ResponseEntity<String> esborrar(@PathVariable int id) {
+	return service.esborrar(id);
 }
 ```
 
-### Servei
+> A la sessió 1 el nom arriba per `@RequestParam` perquè es pugui provar fàcilment. Les dades d'un recurs amb més camps arriben com a JSON amb `@RequestBody` i un DTO, com a `publicar`.
+
+### Videojocs: les operacions del servei fort
+
+| Mètode | URL | Paràmetres o cos | Resposta |
+|---|---|---|---|
+| `GET` | `/api/videojocs` | `?categoria=RPG` (opcional) | `200` + llista de `VideojocResum` |
+| `GET` | `/api/videojocs/{id}` | | `200` + `VideojocResposta`, o `404` |
+| `POST` | `/api/videojocs` | `VideojocPeticio` en JSON | `201` + `Location`, `400`, `404` o `409` |
+| `POST` | `/api/videojocs/{id}/categories/{categoria}` | | `200`, `404` o `409` |
+| `DELETE` | `/api/videojocs/{id}/categories/{categoria}` | | `200` o `404` |
+| `POST` | `/api/videojocs/{id}/llancaments` | `?plataforma=PS5&preu=24.99` | `201`, `404` o `409` |
+| `POST` | `/api/videojocs/descompte` | `?categoria=Acció&import=5` | `200` o `404` |
+| `DELETE` | `/api/videojocs/{id}` | | `204` o `404` |
+
+El controlador és curt: cada mètode llegeix els paràmetres i crida el servei.
 
 ```java
-@Service
-public class EstudiService {
-
-	@Autowired
-	private EstudiRepository repository;
-
-	@Autowired
-	private VideojocRepository vRepository;
-
-	public ResponseEntity<List<Estudi>> llistar() {
-		List<Estudi> estudis = repository.findAll(Sort.by("nom"));
-		return ResponseEntity.ok()
-				.header("Header-Customitzat", "Total estudis: " + estudis.size())
-				.body(estudis);
-	}
-
-	public ResponseEntity<?> buscar(int id) {
-		Optional<Estudi> e = repository.findById(id);
-		if (e.isPresent()) {
-			return ResponseEntity.ok()
-					.header("Header-Customitzat", "Dades estudi ID: " + id)
-					.body(e.get());
-		} else {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND)
-					.header("Header-Customitzat", "ID " + id + " NO TROBAT")
-					.body("NO EXISTEIX CAP ESTUDI AMB ID " + id);
-		}
-	}
-
-	public ResponseEntity<?> crear(EstudiPeticio peticio) {
-		if (repository.existsByNom(peticio.nom())) {
-			return ResponseEntity.status(HttpStatus.CONFLICT)
-					.header("Header-Customitzat", "ESTUDI DUPLICAT")
-					.body("ERROR: JA EXISTEIX L'ESTUDI " + peticio.nom());
-		}
-		Estudi e = repository.save(new Estudi(peticio.nom()));
-		// 201 Created + capçalera Location amb l'URL del recurs nou
-		return ResponseEntity.created(URI.create("/api/estudis/" + e.getId()))
-				.header("Header-Customitzat", "Estudi creat amb ID: " + e.getId())
-				.body(e);
-	}
-
-	/*
-	 * @Transactional: l'estudi que llegim és GESTIONAT fins al final del mètode.
-	 * Amb setNom n'hi ha prou: Hibernate fa l'UPDATE en fer commit (dirty checking), sense save.
-	 */
-	@Transactional
-	public ResponseEntity<?> modificar(int id, EstudiPeticio peticio) {
-		Optional<Estudi> e = repository.findById(id);
-		if (!e.isPresent()) {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND)
-					.header("Header-Customitzat", "ID " + id + " NO TROBAT")
-					.body("NO EXISTEIX CAP ESTUDI AMB ID " + id);
-		}
-		if (repository.existsByNomAndIdNot(peticio.nom(), id)) {
-			return ResponseEntity.status(HttpStatus.CONFLICT)
-					.header("Header-Customitzat", "ESTUDI DUPLICAT")
-					.body("ERROR: JA EXISTEIX UN ALTRE ESTUDI AMB EL NOM " + peticio.nom());
-		}
-		e.get().setNom(peticio.nom());
-		return ResponseEntity.ok()
-				.header("Header-Customitzat", "Estudi " + id + " modificat")
-				.body(e.get());
-	}
-
-	public ResponseEntity<String> esborrar(int id) {
-		// el de §9.1
-	}
-
+// VideojocController
+// POST localhost:8080/api/videojocs   (el JSON de VideojocPeticio)
+@PostMapping
+public ResponseEntity<?> publicar(@Valid @RequestBody VideojocPeticio peticio) {
+	return service.publicar(peticio);
 }
 ```
 
-> `@Transactional` i el *dirty checking* s'expliquen a fons a la sessió 3. De moment: dins d'un mètode `@Transactional`, modificar una entitat que hem llegit és suficient perquè es desi.
+El codi del servei i els DTO de resposta són a la sessió 3 ([§5](Spring_Sessio3_Relacions_Transaccions.md#servei)).
 
-### Controlador
-
-```java
-@RestController
-@RequestMapping(path="/api/estudis")
-public class EstudiController {
-
-	@Autowired
-	private EstudiService service;
-
-	// GET localhost:8080/api/estudis
-	@GetMapping
-	public ResponseEntity<List<Estudi>> llistar() {
-		return service.llistar();
-	}
-
-	// GET localhost:8080/api/estudis/1
-	@GetMapping(path="/{id}")
-	public ResponseEntity<?> buscar(@PathVariable int id) {
-		return service.buscar(id);
-	}
-
-	/*
-	 * POST localhost:8080/api/estudis
-	 * Content-Type: application/json   {"nom": "Valve"}
-	 * @RequestBody: Jackson converteix el JSON del cos en un EstudiPeticio
-	 * @Valid: comprova @NotBlank i @Size ABANS d'entrar al mètode. Si falla -> GestorErrors -> 400
-	 */
-	@PostMapping
-	public ResponseEntity<?> crear(@Valid @RequestBody EstudiPeticio peticio) {
-		return service.crear(peticio);
-	}
-
-	// PUT localhost:8080/api/estudis/1   {"nom": "Nintendo EPD"}
-	@PutMapping(path="/{id}")
-	public ResponseEntity<?> modificar(@PathVariable int id, @Valid @RequestBody EstudiPeticio peticio) {
-		return service.modificar(id, peticio);
-	}
-
-	// DELETE localhost:8080/api/estudis/4
-	@DeleteMapping(path="/{id}")
-	public ResponseEntity<String> esborrar(@PathVariable int id) {
-		return service.esborrar(id);
-	}
-
-}
-```
+> No hi ha cap `PUT`: cap operació del DAO fort substituïa un recurs sencer. Si en calgués un, seguiria el mateix esquema: `@PutMapping("/{id}")` amb `@Valid @RequestBody` i un DTO, `404` si no existeix, `409` si xoca amb un altre recurs, i `200` amb el recurs modificat.
 
 ### Casos de prova
 
-Amb les dades dels CSV (CD Projekt Red = 1, Supergiant Games = 2, Nintendo = 3):
+Amb les dades dels CSV (estudis CD Projekt Red, Supergiant Games i Nintendo; plataformes PC, PS5 i Switch):
 
 | Petició | Cos | Resposta |
 |---|---|---|
-| `POST /api/estudis` | `{"nom": "Valve"}` | `201`, `Location: /api/estudis/4`, `{"id":4,"nom":"Valve"}` |
-| `POST /api/estudis` | `{"nom": "Nintendo"}` | `409` · `ERROR: JA EXISTEIX L'ESTUDI Nintendo` |
-| `POST /api/estudis` | `{"nom": ""}` | `400` · `{"nom":"El nom és obligatori"}` |
-| `POST /api/estudis` | `{"nom": "Valve"` (falta `}`) | `400` (JSON mal format) |
-| `GET /api/estudis` | | `200` · els quatre estudis per ordre alfabètic |
-| `GET /api/estudis/99` | | `404` · `NO EXISTEIX CAP ESTUDI AMB ID 99` |
-| `PUT /api/estudis/1` | `{"nom": "CD PROJEKT RED"}` | `200` · `{"id":1,"nom":"CD PROJEKT RED"}` |
-| `DELETE /api/estudis/1` | | `409` · té videojocs |
-| `DELETE /api/estudis/4` | | `204` |
+| `POST /api/plataformes?nom=Xbox` | | `201` · `PLATAFORMA INSERIDA: Plataforma [id=..., nom=Xbox]` |
+| `POST /api/plataformes?nom=PC` | | `409` · `ERROR: JA EXISTEIX LA PLATAFORMA PC` |
+| `GET /api/plataformes/99` | | `404` · `NO EXISTEIX CAP PLATAFORMA AMB ID 99` |
+| `DELETE /api/plataformes/{id de PC}` | | `409` · té llançaments |
+| `DELETE /api/plataformes/{id de Xbox}` | | `204` |
+| `POST /api/videojocs` | el JSON de [§7](#dto) | `201`, `Location: /api/videojocs/{id nou}` i el `VideojocResposta` |
+| `POST /api/videojocs` | el mateix JSON | `409` · `ERROR: JA EXISTEIX EL VIDEOJOC Hades II` |
+| `POST /api/videojocs` | `{"nom": "", "estudi": "Nintendo", "categories": [], "preus": {}}` | `400` · `{"nom":"El nom és obligatori"}` |
+| `POST /api/videojocs` | `{"nom": "Hades II"` (falta `}`) | `400` (JSON mal format) |
+| `POST /api/videojocs` | el JSON de [§7](#dto) amb `"estudi": "Valve"` | `404` · `NO EXISTEIX L'ESTUDI Valve` |
+| `GET /api/videojocs/99` | | `404` · `NO EXISTEIX CAP VIDEOJOC AMB ID 99` |
 
 ---
 
@@ -650,7 +614,7 @@ Amb les dades dels CSV (CD Projekt Red = 1, Supergiant Games = 2, Nintendo = 3):
 | `POST /jugador/{idJugador}/construir?tipus=...&posicio=...` → un text diferent per a cada cas | `@PathVariable` + `@RequestParam` ([§5.4](#quan)). Cada cas, un `ResponseEntity<String>` amb el seu codi i el seu text ([§9.1](#llancar)): "no és el teu torn", "posició ocupada"... → `409`; "sense recursos" → `409` o `422` |
 | `POST /partida/{idPartida}/daus` → JSON amb la tirada i els recursos rebuts | Acció com a `POST` a una subruta ([§2](#url)); DTO de resposta ([§7](#dto)) |
 | `GET /jugador/{idJugador}/recursos` → 404 si no existeix | `ResponseEntity<?>` ([§6](#retornar), [§9.1](#llancar)) |
-| Document de proves | Col·lecció de Postman o captures de Swagger ([§11](#provar)) |
+| Document de proves | Col·lecció de Postman o captures de Swagger |
 
 > Les rutes de Catan són les de l'enunciat (en singular). Seguiu l'enunciat; les regles de [§2](#url) són les que fareu servir quan dissenyeu una API vosaltres.
 
@@ -667,11 +631,11 @@ Amb les dades dels CSV (CD Projekt Red = 1, Supergiant Games = 2, Nintendo = 3):
 | Les validacions no s'apliquen | Falta `@Valid`, o falta l'starter de validació | [§8](#validar) |
 | `500` (`NoSuchElementException`) en lloc de `404` | El servei fa `findById(id).get()` i l'`Optional` és buit | `isPresent()` i `404` ([§9.1](#llancar)) |
 | Error de validació amb resposta per defecte (sense el JSON de camps) | El `GestorErrors` és fora del paquet arrel, o no té `@RestControllerAdvice` | [§9.2](#advice) |
-| Al cos de l'error surt `null` | `ResponseEntity<Estudi>` amb `.body(null)` en el cas d'error | `ResponseEntity<?>` i el missatge al cos ([§6](#retornar)) |
+| Al cos de l'error surt `null` | `ResponseEntity<Plataforma>` amb `.body(null)` en el cas d'error | `ResponseEntity<?>` i el missatge al cos ([§6](#retornar)) |
 | Caràcters estranys a `Header-Customitzat` | Accents a la capçalera | Sense accents; el missatge al cos ([§6](#retornar)) |
 | `HttpMessageNotWritableException` o JSON infinit | Es retorna una entitat amb relacions bidireccionals | DTO ([§7](#dto)). Sessió 3 |
 | `HttpMessageNotWritableException: No serializer found for class ...` | Es retorna un objecte sense getters públics | Afegir getters, o fer servir un `record` |
-| Funciona amb Postman però no des d'una web | CORS | `@CrossOrigin` ([§12](#consumir)) |
+| Funciona amb Postman però no des d'una web | CORS | `@CrossOrigin` al controlador |
 | `405 Method Not Allowed` | Verb equivocat (`GET` a un `@PostMapping`) | [§3](#metodes) |
 
 ---

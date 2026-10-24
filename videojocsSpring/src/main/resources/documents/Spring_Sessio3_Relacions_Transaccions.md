@@ -233,14 +233,16 @@ Solució: el mètode que el controlador crida directament és el que porta `@Tra
 Dins d'una transacció, les entitats que retorna un repositori són **gestionades** (*managed*). Si se'n modifica un atribut, Hibernate ho detecta i fa l'`UPDATE` en fer commit, **sense cridar `save`**:
 
 ```java
-// EstudiService.modificar (sessió 2), simplificat
+// VideojocService.abaixaPreuPerCategoria (§5.5), simplificat
 @Transactional
-public ResponseEntity<?> modificar(int id, EstudiPeticio peticio) {
-	Optional<Estudi> e = repository.findById(id);
+public ResponseEntity<String> abaixaPreuPerCategoria(String nomCategoria, BigDecimal descompte) {
 	...
-	e.get().setNom(peticio.nom());
-	// cap save: UPDATE estudi SET nom=? WHERE id=? en sortir del mètode
-	return ResponseEntity.ok().body(e.get());
+	List<Llancament> llancaments = lRepository.findByCategories(subarbre);
+	for (Llancament l : llancaments) {
+		l.setPreu(l.getPreu().subtract(descompte));
+		// cap save: UPDATE llancament SET preu=? WHERE id=? per a cada un, en sortir del mètode
+	}
+	...
 }
 ```
 
@@ -346,7 +348,7 @@ Hi ha dues maneres de resoldre-ho, i al projecte fem servir **les dues**, cadasc
 
 | Opció | Idea | Al projecte |
 |---|---|---|
-| **`@JsonIgnore`** | Retornar l'entitat, però amagar les relacions que fan mal | `Plataforma`, `Estudi`, `Categoria` |
+| **`@JsonIgnore`** | Retornar l'entitat, però amagar les relacions que fan mal | `Plataforma`; i als costats inversos d'`Estudi` i `Categoria`, com a xarxa de seguretat |
 | **DTO de resposta** | Retornar un objecte fet a mida, construït dins del servei | `Videojoc`, `Llancament` |
 
 <a id="json-ignore"></a>
@@ -371,10 +373,9 @@ private List<Categoria> filles = new ArrayList<>();
 private Videojoc videojoc;
 ```
 
-Amb això, `Estudi` i `Categoria` es poden retornar directament:
+Amb això, `Estudi` i `Categoria` es podrien retornar directament. Al projecte no es fa, perquè no tenen API pròpia (tot passa per Videojoc, com al DAO fort), però una llista de categories sortiria així:
 
 ```json
-GET /api/categories
 [
   { "id": 5, "nom": "Acció", "pare": null },
   { "id": 6, "nom": "JRPG", "pare": { "id": 2, "nom": "RPG", "pare": null } },
@@ -578,10 +579,10 @@ Fixeu-vos en `Map<String, @Positive BigDecimal>`: la validació s'aplica a **cad
 
 | Si l'entitat... | Feu servir | Al projecte |
 |---|---|---|
-| No té relacions, o només EAGER cap a entitats simples, i el JSON és com l'entitat | L'entitat amb `@JsonIgnore` als costats inversos | `Plataforma`, `Estudi`, `Categoria` |
+| No té relacions, o només EAGER cap a entitats simples, i el JSON és com l'entitat | L'entitat amb `@JsonIgnore` als costats inversos | `Plataforma` |
 | Té relacions LAZY que la resposta necessita | DTO construït al servei | `Videojoc` |
 | La resposta ha de tenir una forma diferent de l'entitat (aplanada, amb camps calculats, amb dades d'altres entitats) | DTO | `Llancament` → `LlancamentResposta` |
-| Rebre dades del client | **Sempre** DTO de petició (sessió 2) | `EstudiPeticio`, `VideojocPeticio` |
+| Rebre dades del client | **Sempre** DTO de petició (sessió 2) | `VideojocPeticio` |
 
 Encara que feu DTO, el `@JsonIgnore` als costats inversos és una bona **xarxa de seguretat**: si algú retorna l'entitat per error, no hi haurà bucle.
 
@@ -599,8 +600,11 @@ Prims: només el que el servei necessita consultar. Les `@Query` s'expliquen a l
 public interface VideojocRepository extends JpaRepository<Videojoc, Integer> {
 	Optional<Videojoc> findByNom(String nom);
 	boolean existsByNom(String nom);
-	boolean existsByEstudiId(Integer idEstudi);
-	long countByEstudiId(Integer idEstudi);
+}
+
+public interface EstudiRepository extends JpaRepository<Estudi, Integer> {
+	// El servei fort busca l'estudi pel nom quan es publica un videojoc
+	Optional<Estudi> findByNom(String nom);
 }
 
 public interface CategoriaRepository extends JpaRepository<Categoria, Integer> {
@@ -623,7 +627,9 @@ public interface LlancamentRepository extends JpaRepository<Llancament, Integer>
 }
 ```
 
-I els d'`Estudi` i `Plataforma` de les sessions anteriors. Cinc repositoris i **un** servei fort: els repositoris són l'equivalent del `GenericDao`; la lògica és al servei.
+I el de `Plataforma` de la sessió 1. Cinc repositoris i **un** servei fort: els repositoris són l'equivalent del `GenericDao`; la lògica és al servei.
+
+**Tot es gestiona des de Videojoc**, com al `VideojocDao`: no hi ha `EstudiService` ni `CategoriaService`. Les altres entitats es busquen pel nom (estudi, categories, plataformes) o es desen en cascada des del videojoc (fitxa tècnica, llançaments). `PlataformaService` és l'exemple introductori de la sessió 1 i es manté a part.
 
 <a id="sv-dto"></a>
 ### 5.2 Estructura del servei
@@ -881,8 +887,8 @@ public ResponseEntity<?> publicar(VideojocPeticio peticio) {
 
 | `VideojocDao` (Hibernate) | `VideojocService` (Spring) | Canvi |
 |---|---|---|
-| `carregarDades()` | `CarregaCsvService.carregarDades()` ([§7](#csv)) | `session.persist` → `repository.save` |
-| `getNomFromID(id)` | `nom(id)` amb `repository.findNomById(id)` (sessió 4, projecció) | La consulta, al repositori |
+| `carregarDades()` | `carregarDades()` ([§7](#csv)) | `session.persist` → `repository.save` |
+| `getNomFromID(id)` | No cal: `mostrar(id)` ja porta el nom | La projecció d'un sol valor és a la sessió 4 ([§5](Spring_Sessio4_Consultes.md#projeccions)) |
 | `mostrarVideojoc(nom)` → `String` | `mostrar(id)` → `ResponseEntity` amb `VideojocResposta` | Retorna un DTO; el JSON el fa Jackson |
 | `llistarPerCategoria(nom)` amb `JOIN FETCH` | `llistar(categoria)` amb `repository.llistarPerCategoria` (sessió 4) | `@Query` al repositori |
 | `afegirCategoria(...)` → missatge | `afegirCategoria(...)` → `ResponseEntity` amb el DTO o el missatge d'error | El missatge d'error porta el seu codi HTTP |
@@ -902,7 +908,8 @@ Curt, com tots: cada mètode llegeix els paràmetres i crida el servei.
 
 ```java
 /*
- * Videojocs. Totes les respostes són DTO:
+ * Videojocs: l'únic controlador de l'agregat, com el VideojocDao era l'únic DAO fort.
+ * Totes les respostes són DTO:
  *   llistats -> VideojocResum      detall -> VideojocResposta
  */
 @RestController
@@ -961,44 +968,22 @@ public class VideojocController {
 		return service.esborrar(id);
 	}
 
-}
-```
-
-I l'acció sobre les categories, al seu propi controlador:
-
-```java
-@RestController
-@RequestMapping(path="/api/categories")
-public class CategoriaController {
-
-	@Autowired
-	private CategoriaService service;
-
-	// Un controlador pot fer servir qualsevol servei: el descompte és una operació del servei fort de videojocs
-	@Autowired
-	private VideojocService vService;
-
-	// GET localhost:8080/api/categories -> entitats amb @JsonIgnore a les filles
-	@GetMapping
-	public ResponseEntity<List<Categoria>> llistar() {
-		return service.llistar();
-	}
-
 	/*
-	 * POST localhost:8080/api/categories/Acció/descompte?import=5
+	 * POST localhost:8080/api/videojocs/descompte?categoria=Acció&import=5
+	 * Abaixa el preu dels videojocs de la categoria i de totes les seves subcategories.
 	 * "import" és una paraula reservada de Java: el paràmetre de l'URL es diu import i el de Java, descompte
 	 */
-	@PostMapping(path="/{nom}/descompte")
+	@PostMapping(path="/descompte")
 	public ResponseEntity<String> descompte(
-			@PathVariable String nom,
+			@RequestParam String categoria,
 			@RequestParam("import") @Positive(message = "El descompte ha de ser positiu") BigDecimal descompte) {
-		return vService.abaixaPreuPerCategoria(nom, descompte);
+		return service.abaixaPreuPerCategoria(categoria, descompte);
 	}
 
 }
 ```
 
-Un controlador pot fer servir qualsevol servei: el servei fort és de l'**agregat** (videojocs i tot el que hi penja), no d'una URL.
+No hi ha `CategoriaController` ni `EstudiController`: el descompte per categoria és una operació **sobre els videojocs** (en baixa els preus), i va a `/api/videojocs` com anava al `VideojocDao`. El servei fort és de l'**agregat** (videojocs i tot el que hi penja), i el seu controlador també.
 
 ---
 
@@ -1018,128 +1003,113 @@ Els **mateixos sis CSV** de la sessió de relacions, a `src/main/resources/dades
 
 L'ordre de càrrega i les dues passades de les categories són les mateixes. Canvien dues coses: `session.persist(x)` passa a ser `repository.save(x)`, i la transacció la posa `@Transactional`.
 
-### El servei de càrrega
+### La càrrega, al servei fort
+
+`carregarDades` és un mètode del `VideojocService`, com era un mètode del `VideojocDao`. Fa servir els mateixos repositoris que la resta del servei:
 
 ```java
 /*
- * És un servei (i no el CommandLineRunner directament) perquè es pugui cridar també des d'un
+ * UNA transacció: si un fitxer té un error, no es desa res.
+ * rollbackFor = Exception.class: IOException és CHECKED, i per defecte Spring
+ * només fa rollback amb RuntimeException. Sense això, faria commit del que s'hagués carregat.
+ * És públic al servei (i no dins del CommandLineRunner) perquè es pugui cridar també des d'un
  * endpoint: a Catan, el tauler es carrega dels CSV quan es crea la partida (POST /partida).
  */
-@Service
-public class CarregaCsvService {
-
-	@Autowired
-	private EstudiRepository eRepository;
-
-	@Autowired
-	private PlataformaRepository pRepository;
-
-	@Autowired
-	private CategoriaRepository cRepository;
-
-	@Autowired
-	private VideojocRepository vRepository;
-
-	/*
-	 * UNA transacció: si un fitxer té un error, no es desa res.
-	 * rollbackFor = Exception.class: IOException és CHECKED, i per defecte Spring
-	 * només fa rollback amb RuntimeException. Sense això, faria commit del que s'hagués carregat.
-	 */
-	@Transactional(rollbackFor = Exception.class)
-	public int carregarDades() throws IOException {
-		// estudis.csv -> nom
-		HashMap<String, Estudi> estudis = new HashMap<>();
-		for (String[] fila : llegirCsv("estudis.csv")) {
-			estudis.put(fila[0], eRepository.save(new Estudi(fila[0])));
-		}
-
-		// plataformes.csv -> nom
-		HashMap<String, Plataforma> plataformes = new HashMap<>();
-		for (String[] fila : llegirCsv("plataformes.csv")) {
-			plataformes.put(fila[0], pRepository.save(new Plataforma(fila[0])));
-		}
-
-		/*
-		 * categories.csv -> nom,pare (pare buit = arrel)
-		 * DUES PASSADES perquè una filla pot aparèixer ABANS que el seu pare.
-		 * Només desem les ARRELS: el cascade de 'filles' desa la resta de l'arbre.
-		 */
-		ArrayList<String[]> filesCategories = llegirCsv("categories.csv");
-		HashMap<String, Categoria> categories = new HashMap<>();
-		for (String[] fila : filesCategories) {
-			categories.put(fila[0], new Categoria(fila[0]));
-		}
-		for (String[] fila : filesCategories) {
-			if (!fila[1].isEmpty()) {
-				Categoria pare = obtenir(categories, fila[1], "categories.csv");
-				pare.afegirFilla(categories.get(fila[0]));
-			}
-		}
-		for (Categoria c : categories.values()) {
-			if (c.getPare() == null) {
-				cRepository.save(c);
-			}
-		}
-
-		// videojocs.csv -> nom,estudi,motor
-		HashMap<String, Videojoc> videojocs = new HashMap<>();
-		for (String[] fila : llegirCsv("videojocs.csv")) {
-			Videojoc v = new Videojoc(fila[0]);
-			obtenir(estudis, fila[1], "videojocs.csv").afegirVideojoc(v);
-			if (!fila[2].isEmpty()) {
-				v.setFitxa(new FitxaTecnica(fila[2]));
-			}
-			videojocs.put(fila[0], vRepository.save(v));
-		}
-
-		// videojoc_categoria.csv -> N:M PURA. Les dues entitats ja són gestionades: cap save
-		for (String[] fila : llegirCsv("videojoc_categoria.csv")) {
-			Videojoc v = obtenir(videojocs, fila[0], "videojoc_categoria.csv");
-			v.afegirCategoria(obtenir(categories, fila[1], "videojoc_categoria.csv"));
-		}
-
-		// llancaments.csv -> N:M AMB ATRIBUTS. Llancament nou que es desa per cascade des del videojoc
-		for (String[] fila : llegirCsv("llancaments.csv")) {
-			Videojoc v = obtenir(videojocs, fila[0], "llancaments.csv");
-			Plataforma p = obtenir(plataformes, fila[1], "llancaments.csv");
-			v.afegirLlancament(p, new BigDecimal(fila[2]));
-		}
-
-		return videojocs.size();
+@Transactional(rollbackFor = Exception.class)
+public int carregarDades() throws IOException {
+	// estudis.csv -> nom
+	HashMap<String, Estudi> estudis = new HashMap<>();
+	for (String[] fila : llegirCsv("estudis.csv")) {
+		estudis.put(fila[0], eRepository.save(new Estudi(fila[0])));
 	}
 
-	// Busca una clau al HashMap. Si no hi és, el CSV fa referència a una cosa que no existeix
-	private <T> T obtenir(HashMap<String, T> mapa, String clau, String fitxer) {
-		T t = mapa.get(clau);
-		if (t == null) {
-			// RuntimeException -> rollback de tota la càrrega
-			throw new IllegalStateException(fitxer + ": no existeix '" + clau + "'");
-		}
-		return t;
+	// plataformes.csv -> nom
+	// Les plataformes ja poden existir (les de la sessió 1): si hi són, les fem servir; si no, les creem
+	HashMap<String, Plataforma> plataformes = new HashMap<>();
+	for (String[] fila : llegirCsv("plataformes.csv")) {
+		Plataforma p = pRepository.findByNom(fila[0]).orElseGet(() -> pRepository.save(new Plataforma(fila[0])));
+		plataformes.put(fila[0], p);
 	}
 
 	/*
-	 * Llegeix un CSV del classpath (src/main/resources/dades/) i en retorna les files sense la capçalera.
-	 * split(",", -1): el -1 conserva les columnes buides del final ("Acció," -> ["Acció", ""]).
+	 * categories.csv -> nom,pare (pare buit = arrel)
+	 * DUES PASSADES perquè una filla pot aparèixer ABANS que el seu pare.
+	 * Només desem les ARRELS: el cascade de 'filles' desa la resta de l'arbre.
 	 */
-	private ArrayList<String[]> llegirCsv(String fitxer) throws IOException {
-		ClassPathResource recurs = new ClassPathResource("dades/" + fitxer);
-		InputStreamReader isr = new InputStreamReader(recurs.getInputStream(), StandardCharsets.UTF_8);
-		BufferedReader br = new BufferedReader(isr);
-
-		ArrayList<String[]> files = new ArrayList<>();
-		br.readLine();                          // capçalera
-		while (br.ready()) {
-			String linia = br.readLine();
-			if (!linia.isBlank()) {
-				files.add(linia.split(",", -1));
-			}
+	ArrayList<String[]> filesCategories = llegirCsv("categories.csv");
+	HashMap<String, Categoria> categories = new HashMap<>();
+	for (String[] fila : filesCategories) {
+		categories.put(fila[0], new Categoria(fila[0]));
+	}
+	for (String[] fila : filesCategories) {
+		if (!fila[1].isEmpty()) {
+			Categoria pare = obtenir(categories, fila[1], "categories.csv");
+			pare.afegirFilla(categories.get(fila[0]));
 		}
-		br.close();
-
-		return files;
+	}
+	for (Categoria c : categories.values()) {
+		if (c.getPare() == null) {
+			cRepository.save(c);
+		}
 	}
 
+	// videojocs.csv -> nom,estudi,motor
+	HashMap<String, Videojoc> videojocs = new HashMap<>();
+	for (String[] fila : llegirCsv("videojocs.csv")) {
+		Videojoc v = new Videojoc(fila[0]);
+		obtenir(estudis, fila[1], "videojocs.csv").afegirVideojoc(v);
+		if (!fila[2].isEmpty()) {
+			v.setFitxa(new FitxaTecnica(fila[2]));
+		}
+		videojocs.put(fila[0], repository.save(v));
+	}
+
+	// videojoc_categoria.csv -> N:M PURA. Les dues entitats ja són gestionades: cap save
+	for (String[] fila : llegirCsv("videojoc_categoria.csv")) {
+		Videojoc v = obtenir(videojocs, fila[0], "videojoc_categoria.csv");
+		v.afegirCategoria(obtenir(categories, fila[1], "videojoc_categoria.csv"));
+	}
+
+	// llancaments.csv -> N:M AMB ATRIBUTS. Llancament nou que es desa per cascade des del videojoc
+	for (String[] fila : llegirCsv("llancaments.csv")) {
+		Videojoc v = obtenir(videojocs, fila[0], "llancaments.csv");
+		Plataforma p = obtenir(plataformes, fila[1], "llancaments.csv");
+		v.afegirLlancament(p, new BigDecimal(fila[2]));
+	}
+
+	return videojocs.size();
+}
+
+// Busca una clau al HashMap. Si no hi és, el CSV fa referència a una cosa que no existeix
+private <T> T obtenir(HashMap<String, T> mapa, String clau, String fitxer) {
+	T t = mapa.get(clau);
+	if (t == null) {
+		// RuntimeException -> rollback de tota la càrrega
+		throw new IllegalStateException(fitxer + ": no existeix '" + clau + "'");
+	}
+	return t;
+}
+
+/*
+ * Llegeix un CSV del classpath (src/main/resources/dades/) i en retorna les files sense la capçalera.
+ * split(",", -1): el -1 conserva les columnes buides del final ("Acció," -> ["Acció", ""]).
+ */
+private ArrayList<String[]> llegirCsv(String fitxer) throws IOException {
+	ClassPathResource recurs = new ClassPathResource("dades/" + fitxer);
+	InputStreamReader isr = new InputStreamReader(recurs.getInputStream(), StandardCharsets.UTF_8);
+	BufferedReader br = new BufferedReader(isr);
+
+	ArrayList<String[]> files = new ArrayList<>();
+	br.readLine();                          // capçalera
+	while (br.ready()) {
+		String linia = br.readLine();
+		if (!linia.isBlank()) {
+			files.add(linia.split(",", -1));
+		}
+	}
+	br.close();
+
+	return files;
 }
 ```
 
@@ -1149,6 +1119,7 @@ public class CarregaCsvService {
 | `InputStreamReader(..., StandardCharsets.UTF_8)` | Els CSV són UTF-8 (`Acció`). Sense indicar-ho, depèn del sistema operatiu |
 | `@Transactional(rollbackFor = Exception.class)` | `llegirCsv` llança `IOException`, que és *checked*: sense `rollbackFor`, no faria rollback ([§2.4](#tx-rollback)) |
 | `throw new IllegalStateException(...)` a `obtenir` | Una clau del CSV que no existeix és un error de dades: `RuntimeException` → rollback de tot |
+| `findByNom(...).orElseGet(...)` a les plataformes | La BD ja té les plataformes de la sessió 1. Si les tornéssim a crear, el `UNIQUE` del nom petaria i es desfaria tota la càrrega |
 
 ### Executar-la en arrencar: `CommandLineRunner`
 
@@ -1159,7 +1130,7 @@ Un bean que implementa `CommandLineRunner` s'executa **un cop**, quan l'aplicaci
 public class CarregaInicial implements CommandLineRunner {
 
 	@Autowired
-	private CarregaCsvService carrega;
+	private VideojocService service;
 
 	@Autowired
 	private VideojocRepository vRepository;
@@ -1170,7 +1141,7 @@ public class CarregaInicial implements CommandLineRunner {
 			System.out.println("La BD ja té dades: no es carreguen els CSV");
 			return;
 		}
-		int n = carrega.carregarDades();
+		int n = service.carregarDades();
 		System.out.println("Videojocs carregats dels CSV: " + n);
 	}
 
@@ -1182,7 +1153,7 @@ public class CarregaInicial implements CommandLineRunner {
 | `create` | Taules noves i buides → sempre es carreguen els CSV. Cada arrencada comença igual: ideal per provar |
 | `update` | Les dades es conserven → la comprovació `count() > 0` evita duplicar-les |
 
-**Per què la càrrega és en un servei i no dins del `run`?** Perquè així es pot cridar també des d'un endpoint. A Catan, el tauler es carrega dels CSV **quan es crea una partida** (`POST /partida`), no en arrencar.
+**Per què la càrrega és al servei i no dins del `run`?** Perquè així es pot cridar també des d'un endpoint, i perquè passa pel proxy: el `run` crida un mètode `@Transactional` d'un altre bean ([§2.6](#tx-autocrida)). A Catan, el tauler es carrega dels CSV **quan es crea una partida** (`POST /partida`), no en arrencar.
 
 ---
 
@@ -1195,7 +1166,7 @@ public class CarregaInicial implements CommandLineRunner {
 | Cada endpoint que modifica dades crida un mètode `@Transactional` | [§2](#transactional) |
 | `ConstruirPoblat` crida `ComprovarVictoria` dins de la mateixa transacció | [§2.5](#tx-propagacio) |
 | "No és el teu torn", "posició ocupada", "sense recursos"... | Un `ResponseEntity` amb el codi i el text de cada cas, comprovat **abans** de modificar; si no pot ser, `setRollbackOnly()` ([§2.4](#tx-rollback)) |
-| `POST /partida` carrega el tauler dels CSV en una transacció | [§7](#csv): el servei de càrrega cridat des del servei de partida |
+| `POST /partida` carrega el tauler dels CSV en una transacció | [§7](#csv): la càrrega dels CSV, dins del servei fort de la partida |
 | `GET /partida/{id}/tauler`: hexàgons amb terreny, número, lladre i construccions | DTO construït al servei ([§4.4](#json-dto)) |
 | `GET /jugador/{id}/recursos`: el jugador amb el seu inventari | Els recursos del jugador són una relació (probablement LAZY): DTO construït al servei ([§4.4](#json-dto), [§4.5](#json-triar)) |
 | Herència `JOINED` de les construccions | Les entitats no canvien: el repositori de la classe pare retorna les filles |
@@ -1220,6 +1191,7 @@ public class CarregaInicial implements CommandLineRunner {
 | `UnexpectedRollbackException: Transaction silently rolled back because it has been marked as rollback-only` | Un altre bean `@Transactional` ha llançat una excepció dins la mateixa transacció i el mètode de fora l'ha capturada | No capturar-la, o que el de dins sigui `REQUIRES_NEW` si realment ha de ser independent |
 | `DataIntegrityViolationException` al commit | S'ha violat un `UNIQUE` o una FK que no s'havia comprovat | Comprovar abans de modificar ([§5.4](#sv-relacions)) |
 | Les dades dels CSV es dupliquen a cada arrencada | `ddl-auto=update` sense la comprovació `count() > 0` | [§7](#csv) |
+| `DataIntegrityViolationException: Duplicate entry 'PC'` en carregar els CSV | La BD ja tenia algunes files (les plataformes de la sessió 1) i el CSV les torna a crear | Buscar-les pel nom abans de crear-les ([§7](#csv)), o `ddl-auto=create` |
 | `FileNotFoundException: class path resource [dades/...]` | El CSV no és a `src/main/resources/dades/` o el nom no coincideix | Revisar la ruta i les majúscules |
 | `IllegalStateException: videojocs.csv: no existeix 'Nintend'` | Una clau del CSV no coincideix amb cap fila del fitxer on apunta | Corregir el CSV |
 | Avís `spring.jpa.open-in-view is enabled by default` | No s'ha configurat | `spring.jpa.open-in-view=false` ([§3](#lazy)) |

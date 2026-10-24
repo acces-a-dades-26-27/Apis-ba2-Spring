@@ -4,7 +4,7 @@
 
 Fins ara els repositoris tenien el CRUD heretat i algun `findByNom`. Avui veiem totes les maneres de consultar: des d'un nom de mètode que Spring converteix en SQL fins a JPQL, SQL natiu, projeccions, actualitzacions massives i paginació. Tot el que fèiem amb HQL dins del DAO té el seu lloc al repositori.
 
-Les consultes marcades amb **(projecte)** són al projecte `videojocsSpring`, amb el seu endpoint i la seva petició a la col·lecció de Postman. La resta són exemples per als exercicis.
+Les consultes marcades amb **(projecte)** són al projecte `videojocsSpring`, amb el seu endpoint. La resta són exemples per als exercicis.
 
 ---
 
@@ -111,10 +111,10 @@ public interface CategoriaRepository extends JpaRepository<Categoria, Integer> {
 
 	Optional<Categoria> findByNom(String nom);
 
-	// Les arrels de l'arbre: pare_id IS NULL                                     (projecte)
+	// Les arrels de l'arbre: pare_id IS NULL
 	List<Categoria> findByPareIsNullOrderByNom();
 
-	// Les filles d'una categoria, navegant per la relació: categoria.pare.nom    (projecte)
+	// Les filles d'una categoria, navegant per la relació: categoria.pare.nom
 	List<Categoria> findByPareNomOrderByNom(String nomPare);
 
 }
